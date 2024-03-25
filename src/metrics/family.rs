@@ -6,8 +6,8 @@ use crate::encoding::{EncodeLabelSet, EncodeMetric, MetricEncoder};
 
 use super::{MetricType, TypedMetric};
 use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::collections::HashMap;
 use std::sync::Arc;
+use std::{collections::HashMap, hash::RandomState};
 
 /// Representation of the OpenMetrics *MetricFamily* data type.
 ///
@@ -100,8 +100,8 @@ use std::sync::Arc;
 /// # assert_eq!(expected, buffer);
 /// ```
 // TODO: Consider exposing hash algorithm.
-pub struct Family<S, M, C = fn() -> M> {
-    metrics: Arc<RwLock<HashMap<S, M>>>,
+pub struct Family<S, M, C = fn() -> M, H = RandomState> {
+    metrics: Arc<RwLock<HashMap<S, M, H>>>,
     /// Function that when called constructs a new metric.
     ///
     /// For most metric types this would simply be its [`Default`]
@@ -177,7 +177,7 @@ impl<S: Clone + std::hash::Hash + Eq, M: Default> Default for Family<S, M> {
     }
 }
 
-impl<S: Clone + std::hash::Hash + Eq, M, C> Family<S, M, C> {
+impl<S: Clone + std::hash::Hash + Eq, M, C, H: Default> Family<S, M, C, H> {
     /// Create a metric family using a custom constructor to construct new
     /// metrics.
     ///
@@ -201,7 +201,28 @@ impl<S: Clone + std::hash::Hash + Eq, M, C> Family<S, M, C> {
     /// ```
     pub fn new_with_constructor(constructor: C) -> Self {
         Self {
-            metrics: Arc::new(RwLock::new(Default::default())),
+            metrics: Arc::new(RwLock::new(HashMap::<S, M, H>::default())),
+            constructor,
+        }
+    }
+}
+
+impl<S: Clone + std::hash::Hash + Eq, M: Default, H> Family<S, M, fn() -> M, H> {
+    /// Create a metric family using a custom hasher for the hashmap of metrics.
+    pub fn new_with_hasher(hasher: H) -> Self {
+        Self {
+            metrics: Arc::new(RwLock::new(HashMap::with_hasher(hasher))),
+            constructor: M::default,
+        }
+    }
+}
+
+impl<S: Clone + std::hash::Hash + Eq, M, C, H> Family<S, M, C, H> {
+    /// Create a metric family using a custom constructor to construct new
+    /// metrics and a custom hasher for the hashmap of metrics.
+    pub fn new_with_constructor_and_hasher(constructor: C, hasher: H) -> Self {
+        Self {
+            metrics: Arc::new(RwLock::new(HashMap::with_hasher(hasher))),
             constructor,
         }
     }
