@@ -4,6 +4,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.2]
+
+### Added
+
+- Added `Gauge<u32, AtomicU32>` implementation.
+  See [PR 191].
+
+[PR 191]: https://github.com/prometheus/client_rust/pull/191
+
+## [0.22.1]
+
+### Added
+
+- Added `EncodeLabelValue` and `EncodeLabelKey` implementations for `Arc`,
+  `Rc`, and `Box`.
+  See [PR 188].
+
+[PR 188]: https://github.com/prometheus/client_rust/pull/188
+
+## [0.22.0]
+
+### Changed
+
+- Simplify `Collector` `trait` by enabling `Collector::collect` to encode metrics directly with a `DescriptorEncoder`.
+  See [PR 149] for details.
+
+[PR 149]: https://github.com/prometheus/client_rust/pull/149
+
+## [0.21.2]
+
+### Added
+
+- Added `sub_registry_with_labels` method to `Registry`.
+  See [PR 145].
+- Added `with_labels` and `with_prefix_and_labels` constructors to `Registry`.
+  See [PR 147].
+
+[PR 145]: https://github.com/prometheus/client_rust/pull/145
+[PR 147]: https://github.com/prometheus/client_rust/pull/147
+
 ## [0.21.1]
 
 ### Added
