@@ -7,7 +7,10 @@ use crate::encoding::{EncodeLabelSet, EncodeMetric, MetricEncoder};
 use super::{MetricType, TypedMetric};
 use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::sync::Arc;
-use std::{collections::HashMap, hash::RandomState};
+use std::{
+    collections::HashMap,
+    hash::{BuildHasher, RandomState},
+};
 
 /// Representation of the OpenMetrics *MetricFamily* data type.
 ///
@@ -168,7 +171,9 @@ impl<M, F: Fn() -> M> MetricConstructor<M> for F {
     }
 }
 
-impl<S: Clone + std::hash::Hash + Eq, M: Default> Default for Family<S, M> {
+impl<S: Clone + std::hash::Hash + Eq, M: Default, H: Default> Default
+    for Family<S, M, fn() -> M, H>
+{
     fn default() -> Self {
         Self {
             metrics: Arc::new(RwLock::new(Default::default())),
@@ -228,7 +233,9 @@ impl<S: Clone + std::hash::Hash + Eq, M, C, H> Family<S, M, C, H> {
     }
 }
 
-impl<S: Clone + std::hash::Hash + Eq, M, C: MetricConstructor<M>> Family<S, M, C> {
+impl<S: Clone + std::hash::Hash + Eq, M, C: MetricConstructor<M>, H: BuildHasher>
+    Family<S, M, C, H>
+{
     /// Access a metric with the given label set, creating it if one does not
     /// yet exist.
     ///
@@ -309,7 +316,7 @@ impl<S: Clone + std::hash::Hash + Eq, M, C: MetricConstructor<M>> Family<S, M, C
         self.metrics.write().clear()
     }
 
-    pub(crate) fn read(&self) -> RwLockReadGuard<HashMap<S, M>> {
+    pub(crate) fn read(&self) -> RwLockReadGuard<HashMap<S, M, H>> {
         self.metrics.read()
     }
 }
@@ -349,6 +356,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::hash::Hasher;
+
     use super::*;
     use crate::metrics::counter::Counter;
     use crate::metrics::histogram::{exponential_buckets, Histogram};
@@ -472,5 +481,49 @@ mod tests {
                 .get_or_create(&vec![("method".to_string(), "GET".to_string())])
                 .get()
         );
+    }
+
+    #[derive(Clone, Default)]
+    struct DummyHasher;
+    impl Hasher for DummyHasher {
+        fn finish(&self) -> u64 {
+            0
+        }
+
+        fn write(&mut self, _bytes: &[u8]) {}
+    }
+    impl BuildHasher for DummyHasher {
+        type Hasher = Self;
+
+        fn build_hasher(&self) -> Self::Hasher {
+            Self
+        }
+    }
+
+    #[test]
+    fn family_with_custom_hasher() {
+        fn run_family_test<M>(
+            f: Family<&str, M, impl Fn() -> M, impl BuildHasher>,
+            record_metric: impl Fn(&M),
+        ) {
+            let m = f.get_or_create(&"a");
+            record_metric(&*m);
+        }
+
+        let family = Family::<&str, Counter, _, DummyHasher>::default();
+        run_family_test(family, |counter: &Counter| {
+            counter.inc();
+        });
+
+        let family = Family::<&str, Histogram, _, DummyHasher>::new_with_constructor(|| {
+            Histogram::new(exponential_buckets(1.0, 2.0, 3))
+        });
+        run_family_test(family, |histogram: &Histogram| histogram.observe(1.5));
+
+        let family = Family::<&str, Histogram, _, _>::new_with_constructor_and_hasher(
+            || Histogram::new(exponential_buckets(1.0, 2.0, 3)),
+            DummyHasher,
+        );
+        run_family_test(family, |histogram: &Histogram| histogram.observe(1.5));
     }
 }
