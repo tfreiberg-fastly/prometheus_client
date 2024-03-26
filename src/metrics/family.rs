@@ -182,7 +182,7 @@ impl<S: Clone + std::hash::Hash + Eq, M: Default, H: Default> Default
     }
 }
 
-impl<S: Clone + std::hash::Hash + Eq, M, C, H: Default> Family<S, M, C, H> {
+impl<S: Clone + std::hash::Hash + Eq, M, C> Family<S, M, C> {
     /// Create a metric family using a custom constructor to construct new
     /// metrics.
     ///
@@ -206,7 +206,7 @@ impl<S: Clone + std::hash::Hash + Eq, M, C, H: Default> Family<S, M, C, H> {
     /// ```
     pub fn new_with_constructor(constructor: C) -> Self {
         Self {
-            metrics: Arc::new(RwLock::new(HashMap::<S, M, H>::default())),
+            metrics: Arc::new(RwLock::new(HashMap::<S, M>::default())),
             constructor,
         }
     }
@@ -334,11 +334,12 @@ impl<S, M: TypedMetric, C> TypedMetric for Family<S, M, C> {
     const TYPE: MetricType = <M as TypedMetric>::TYPE;
 }
 
-impl<S, M, C> EncodeMetric for Family<S, M, C>
+impl<S, M, C, H> EncodeMetric for Family<S, M, C, H>
 where
     S: Clone + std::hash::Hash + Eq + EncodeLabelSet,
     M: EncodeMetric + TypedMetric,
     C: MetricConstructor<M>,
+    H: BuildHasher,
 {
     fn encode(&self, mut encoder: MetricEncoder) -> Result<(), std::fmt::Error> {
         let guard = self.read();
@@ -502,26 +503,25 @@ mod tests {
 
     #[test]
     fn family_with_custom_hasher() {
-        fn run_family_test<M: Debug>(
-            f: Family<&str, M, impl Fn() -> M, impl BuildHasher>,
+        fn run_family_test<M: Debug + TypedMetric + EncodeMetric>(
+            f: Family<Vec<(&str, &str)>, M, impl Fn() -> M, impl BuildHasher>,
             record_metric: impl Fn(&M),
         ) {
             eprintln!("checking family {f:?}");
-            let m = f.get_or_create(&"a");
-            record_metric(&*m);
+            {
+                let m = f.get_or_create(&vec![("label", "value")]);
+                record_metric(&*m);
+            }
+            takes_encodemetric(f);
         }
+        fn takes_encodemetric(_: impl EncodeMetric) {}
 
-        let family = Family::<&str, Counter, _, DummyHasher>::default();
+        let family = Family::<Vec<(&str, &str)>, Counter, _, DummyHasher>::default();
         run_family_test(family, |counter: &Counter| {
             counter.inc();
         });
 
-        let family = Family::<&str, Histogram, _, DummyHasher>::new_with_constructor(|| {
-            Histogram::new(exponential_buckets(1.0, 2.0, 3))
-        });
-        run_family_test(family, |histogram: &Histogram| histogram.observe(1.5));
-
-        let family = Family::<&str, Histogram, _, _>::new_with_constructor_and_hasher(
+        let family = Family::<Vec<(&str, &str)>, Histogram, _, _>::new_with_constructor_and_hasher(
             || Histogram::new(exponential_buckets(1.0, 2.0, 3)),
             DummyHasher,
         );
