@@ -314,7 +314,7 @@ impl<S: Clone + std::hash::Hash + Eq, M, C: MetricConstructor<M>> Family<S, M, C
     }
 }
 
-impl<S, M, C: Clone> Clone for Family<S, M, C> {
+impl<S, M, C: Clone, H: Clone> Clone for Family<S, M, C, H> {
     fn clone(&self) -> Self {
         Family {
             metrics: self.metrics.clone(),
