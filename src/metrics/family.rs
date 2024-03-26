@@ -116,7 +116,7 @@ pub struct Family<S, M, C = fn() -> M, H = RandomState> {
     constructor: C,
 }
 
-impl<S: std::fmt::Debug, M: std::fmt::Debug, C> std::fmt::Debug for Family<S, M, C> {
+impl<S: std::fmt::Debug, M: std::fmt::Debug, C, H> std::fmt::Debug for Family<S, M, C, H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Family")
             .field("metrics", &self.metrics)
@@ -356,7 +356,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::hash::Hasher;
+    use std::{fmt::Debug, hash::Hasher};
 
     use super::*;
     use crate::metrics::counter::Counter;
@@ -502,10 +502,11 @@ mod tests {
 
     #[test]
     fn family_with_custom_hasher() {
-        fn run_family_test<M>(
+        fn run_family_test<M: Debug>(
             f: Family<&str, M, impl Fn() -> M, impl BuildHasher>,
             record_metric: impl Fn(&M),
         ) {
+            eprintln!("checking family {f:?}");
             let m = f.get_or_create(&"a");
             record_metric(&*m);
         }
