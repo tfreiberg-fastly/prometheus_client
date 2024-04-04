@@ -5,9 +5,7 @@
 use crate::encoding::{EncodeMetric, MetricEncoder};
 
 use super::{MetricType, TypedMetric};
-use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard};
 use std::iter::{self, once};
-use std::sync::Arc;
 
 /// Open Metrics [`Histogram`] to measure distributions of discrete events.
 ///
@@ -33,21 +31,8 @@ use std::sync::Arc;
 /// ```
 // TODO: Consider using atomics. See
 // https://github.com/tikv/rust-prometheus/pull/314.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Histogram {
-    inner: Arc<RwLock<Inner>>,
-}
-
-impl Clone for Histogram {
-    fn clone(&self) -> Self {
-        Histogram {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct Inner {
     // TODO: Consider allowing integer observe values.
     sum: f64,
     count: u64,
@@ -55,39 +40,36 @@ pub(crate) struct Inner {
     buckets: Vec<(f64, u64)>,
 }
 
+#[derive(Debug)]
+pub(crate) struct Inner {}
+
 impl Histogram {
     /// Create a new [`Histogram`].
     pub fn new(buckets: impl Iterator<Item = f64>) -> Self {
         Self {
-            inner: Arc::new(RwLock::new(Inner {
-                sum: Default::default(),
-                count: Default::default(),
-                buckets: buckets
-                    .into_iter()
-                    .chain(once(f64::MAX))
-                    .map(|upper_bound| (upper_bound, 0))
-                    .collect(),
-            })),
+            sum: Default::default(),
+            count: Default::default(),
+            buckets: buckets
+                .into_iter()
+                .chain(once(f64::MAX))
+                .map(|upper_bound| (upper_bound, 0))
+                .collect(),
         }
     }
 
     /// Number observed values
     pub fn count(&self) -> u64 {
-        let inner = self.inner.read();
-
-        inner.count
+        self.count
     }
 
     /// Observe the given value.
-    pub fn observe(&self, v: f64) {
+    pub fn observe(&mut self, v: f64) {
         self.observe_and_bucket(v);
     }
 
     /// Sum of observed values
     pub fn sum(&self) -> f64 {
-        let inner = self.inner.read();
-
-        inner.sum
+        self.sum
     }
 
     /// Observes the given value, returning the index of the first bucket the
@@ -95,12 +77,11 @@ impl Histogram {
     ///
     /// Needed in
     /// [`HistogramWithExemplars`](crate::metrics::exemplar::HistogramWithExemplars).
-    pub(crate) fn observe_and_bucket(&self, v: f64) -> Option<usize> {
-        let mut inner = self.inner.write();
-        inner.sum += v;
-        inner.count += 1;
+    pub(crate) fn observe_and_bucket(&mut self, v: f64) -> Option<usize> {
+        self.sum += v;
+        self.count += 1;
 
-        let first_bucket = inner
+        let first_bucket = self
             .buckets
             .iter_mut()
             .enumerate()
@@ -115,12 +96,8 @@ impl Histogram {
         }
     }
 
-    pub(crate) fn get(&self) -> (f64, u64, MappedRwLockReadGuard<Vec<(f64, u64)>>) {
-        let inner = self.inner.read();
-        let sum = inner.sum;
-        let count = inner.count;
-        let buckets = RwLockReadGuard::map(inner, |inner| &inner.buckets);
-        (sum, count, buckets)
+    pub(crate) fn get(&self) -> (f64, u64, &[(f64, u64)]) {
+        (self.sum, self.count, &self.buckets)
     }
 }
 
@@ -161,7 +138,7 @@ mod tests {
 
     #[test]
     fn histogram() {
-        let histogram = Histogram::new(exponential_buckets(1.0, 2.0, 10));
+        let mut histogram = Histogram::new(exponential_buckets(1.0, 2.0, 10));
         histogram.observe(1.0);
         histogram.observe(2.0);
 

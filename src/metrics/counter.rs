@@ -5,11 +5,6 @@
 use crate::encoding::{EncodeMetric, MetricEncoder};
 
 use super::{MetricType, TypedMetric};
-use std::marker::PhantomData;
-#[cfg(not(any(target_arch = "mips", target_arch = "powerpc")))]
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
 
 /// Open Metrics [`Counter`] to measure discrete events.
 ///
@@ -42,45 +37,41 @@ use std::sync::Arc;
 /// ```
 #[cfg(not(any(target_arch = "mips", target_arch = "powerpc")))]
 #[derive(Debug)]
-pub struct Counter<N = u64, A = AtomicU64> {
-    value: Arc<A>,
-    phantom: PhantomData<N>,
+pub struct Counter<N = u64> {
+    value: N,
 }
 
 /// Open Metrics [`Counter`] to measure discrete events.
 #[cfg(any(target_arch = "mips", target_arch = "powerpc"))]
 #[derive(Debug)]
-pub struct Counter<N = u32, A = AtomicU32> {
-    value: Arc<A>,
-    phantom: PhantomData<N>,
+pub struct Counter<N = u32> {
+    value: N,
 }
 
-impl<N, A> Clone for Counter<N, A> {
+impl<N: Clone> Clone for Counter<N> {
     fn clone(&self) -> Self {
         Self {
             value: self.value.clone(),
-            phantom: PhantomData,
         }
     }
 }
 
-impl<N, A: Default> Default for Counter<N, A> {
+impl<N: Default> Default for Counter<N> {
     fn default() -> Self {
         Counter {
-            value: Arc::new(A::default()),
-            phantom: PhantomData,
+            value: N::default(),
         }
     }
 }
 
-impl<N, A: Atomic<N>> Counter<N, A> {
+impl<N: Number> Counter<N> {
     /// Increase the [`Counter`] by 1, returning the previous value.
-    pub fn inc(&self) -> N {
+    pub fn inc(&mut self) -> N {
         self.value.inc()
     }
 
     /// Increase the [`Counter`] by `v`, returning the previous value.
-    pub fn inc_by(&self, v: N) -> N {
+    pub fn inc_by(&mut self, v: N) -> N {
         self.value.inc_by(v)
     }
 
@@ -88,95 +79,77 @@ impl<N, A: Atomic<N>> Counter<N, A> {
     pub fn get(&self) -> N {
         self.value.get()
     }
-
-    /// Exposes the inner atomic type of the [`Counter`].
-    ///
-    /// This should only be used for advanced use-cases which are not directly
-    /// supported by the library.
-    ///
-    /// The caller of this function has to uphold the property of an Open
-    /// Metrics counter namely that the value is monotonically increasing, i.e.
-    /// either stays the same or increases.
-    pub fn inner(&self) -> &A {
-        &self.value
-    }
 }
 
 /// Atomic operations for a [`Counter`] value store.
-pub trait Atomic<N> {
+pub trait Number {
     /// Increase the value by `1`.
-    fn inc(&self) -> N;
+    fn inc(&mut self) -> Self;
 
     /// Increase the value.
-    fn inc_by(&self, v: N) -> N;
+    fn inc_by(&mut self, v: Self) -> Self;
 
     /// Get the the value.
-    fn get(&self) -> N;
+    fn get(&self) -> Self;
 }
 
 #[cfg(not(any(target_arch = "mips", target_arch = "powerpc")))]
-impl Atomic<u64> for AtomicU64 {
-    fn inc(&self) -> u64 {
-        self.inc_by(1)
+impl Number for u64 {
+    fn inc(&mut self) -> u64 {
+        *self += 1;
+        *self
     }
 
-    fn inc_by(&self, v: u64) -> u64 {
-        self.fetch_add(v, Ordering::Relaxed)
+    fn inc_by(&mut self, v: u64) -> u64 {
+        *self += v;
+        *self
     }
 
     fn get(&self) -> u64 {
-        self.load(Ordering::Relaxed)
+        *self
     }
 }
 
-impl Atomic<u32> for AtomicU32 {
-    fn inc(&self) -> u32 {
-        self.inc_by(1)
+impl Number for u32 {
+    fn inc(&mut self) -> u32 {
+        *self += 1;
+        *self
     }
 
-    fn inc_by(&self, v: u32) -> u32 {
-        self.fetch_add(v, Ordering::Relaxed)
+    fn inc_by(&mut self, v: u32) -> u32 {
+        *self += v;
+        *self
     }
 
     fn get(&self) -> u32 {
-        self.load(Ordering::Relaxed)
+        *self
     }
 }
 
 #[cfg(not(any(target_arch = "mips", target_arch = "powerpc")))]
-impl Atomic<f64> for AtomicU64 {
-    fn inc(&self) -> f64 {
-        self.inc_by(1.0)
+impl Number for f64 {
+    fn inc(&mut self) -> f64 {
+        *self += 1.0;
+        *self
     }
 
-    fn inc_by(&self, v: f64) -> f64 {
-        let mut old_u64 = self.load(Ordering::Relaxed);
-        let mut old_f64;
-        loop {
-            old_f64 = f64::from_bits(old_u64);
-            let new = f64::to_bits(old_f64 + v);
-            match self.compare_exchange_weak(old_u64, new, Ordering::Relaxed, Ordering::Relaxed) {
-                Ok(_) => break,
-                Err(x) => old_u64 = x,
-            }
-        }
-
-        old_f64
+    fn inc_by(&mut self, v: f64) -> f64 {
+        *self += v;
+        *self
     }
 
     fn get(&self) -> f64 {
-        f64::from_bits(self.load(Ordering::Relaxed))
+        *self
     }
 }
 
-impl<N, A> TypedMetric for Counter<N, A> {
+impl<N> TypedMetric for Counter<N> {
     const TYPE: MetricType = MetricType::Counter;
 }
 
-impl<N, A> EncodeMetric for Counter<N, A>
+impl<N> EncodeMetric for Counter<N>
 where
-    N: crate::encoding::EncodeCounterValue,
-    A: Atomic<N>,
+    N: crate::encoding::EncodeCounterValue + Number,
 {
     fn encode(&self, mut encoder: MetricEncoder) -> Result<(), std::fmt::Error> {
         encoder.encode_counter::<(), _, u64>(&self.get(), None)
@@ -226,7 +199,7 @@ mod tests {
 
     #[test]
     fn inc_and_get() {
-        let counter: Counter = Counter::default();
+        let mut counter: Counter = Counter::default();
         assert_eq!(0, counter.inc());
         assert_eq!(1, counter.get());
     }
@@ -240,8 +213,8 @@ mod tests {
                 // Map infinite, subnormal and NaN to 0.0.
                 .map(|f| if f.is_normal() { f } else { 0.0 })
                 .collect();
-            let sum = fs.iter().sum();
-            let counter = Counter::<f64, AtomicU64>::default();
+            let sum: f64 = fs.iter().sum();
+            let mut counter = Counter::<f64>::default();
             for f in fs {
                 counter.inc_by(f);
             }

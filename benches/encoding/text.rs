@@ -48,21 +48,10 @@ pub fn text(c: &mut Criterion) {
         let mut registry = Registry::default();
 
         for i in 0..100 {
-            let counter_family = Family::<Labels, Counter>::default();
-            let histogram_family = Family::<Labels, Histogram>::new_with_constructor(|| {
+            let mut counter_family = Family::<Labels, Counter>::default();
+            let mut histogram_family = Family::<Labels, Histogram>::new_with_constructor(|| {
                 Histogram::new(exponential_buckets(1.0, 2.0, 10))
             });
-
-            registry.register(
-                format!("my_counter_{}", i),
-                "My counter",
-                counter_family.clone(),
-            );
-            registry.register(
-                format!("my_histogram_{}", i),
-                "My histogram",
-                histogram_family.clone(),
-            );
 
             for j in 0u32..100 {
                 counter_family
@@ -80,6 +69,13 @@ pub fn text(c: &mut Criterion) {
                     })
                     .observe(j.into());
             }
+
+            registry.register(format!("my_counter_{}", i), "My counter", counter_family);
+            registry.register(
+                format!("my_histogram_{}", i),
+                "My histogram",
+                histogram_family,
+            );
         }
 
         let mut buffer = String::new();

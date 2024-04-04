@@ -571,7 +571,6 @@ mod tests {
     use crate::metrics::{counter::Counter, exemplar::CounterWithExemplar};
     use pyo3::{prelude::*, types::PyModule};
     use std::borrow::Cow;
-    use std::sync::atomic::AtomicU32;
 
     #[test]
     fn encode_counter() {
@@ -609,7 +608,7 @@ mod tests {
     fn encode_counter_with_exemplar() {
         let mut registry = Registry::default();
 
-        let counter_with_exemplar: CounterWithExemplar<Vec<(String, u64)>> =
+        let mut counter_with_exemplar: CounterWithExemplar<Vec<(String, u64)>> =
             CounterWithExemplar::default();
         registry.register_with_unit(
             "my_counter_with_exemplar",
@@ -639,7 +638,7 @@ mod tests {
         let mut registry = Registry::default();
         let gauge: Gauge = Gauge::default();
         registry.register("my_gauge", "My gauge", gauge);
-        let gauge = Gauge::<u32, AtomicU32>::default();
+        let gauge = Gauge::<u32>::default();
         registry.register("u32_gauge", "Gauge::<u32, AtomicU32>", gauge);
 
         let mut encoded = String::new();
@@ -652,8 +651,7 @@ mod tests {
     #[test]
     fn encode_counter_family() {
         let mut registry = Registry::default();
-        let family = Family::<Vec<(String, String)>, Counter>::default();
-        registry.register("my_counter_family", "My counter family", family.clone());
+        let mut family = Family::<Vec<(String, String)>, Counter>::default();
 
         family
             .get_or_create(&vec![
@@ -661,6 +659,8 @@ mod tests {
                 ("status".to_string(), "200".to_string()),
             ])
             .inc();
+
+        registry.register("my_counter_family", "My counter family", family);
 
         let mut encoded = String::new();
 
@@ -675,8 +675,7 @@ mod tests {
         let sub_registry = registry.sub_registry_with_prefix("my_prefix");
         let sub_sub_registry = sub_registry
             .sub_registry_with_label((Cow::Borrowed("my_key"), Cow::Borrowed("my_value")));
-        let family = Family::<Vec<(String, String)>, Counter>::default();
-        sub_sub_registry.register("my_counter_family", "My counter family", family.clone());
+        let mut family = Family::<Vec<(String, String)>, Counter>::default();
 
         family
             .get_or_create(&vec![
@@ -684,6 +683,8 @@ mod tests {
                 ("status".to_string(), "200".to_string()),
             ])
             .inc();
+
+        sub_sub_registry.register("my_counter_family", "My counter family", family);
 
         let mut encoded = String::new();
 
@@ -720,9 +721,9 @@ mod tests {
     #[test]
     fn encode_histogram() {
         let mut registry = Registry::default();
-        let histogram = Histogram::new(exponential_buckets(1.0, 2.0, 10));
-        registry.register("my_histogram", "My histogram", histogram.clone());
+        let mut histogram = Histogram::new(exponential_buckets(1.0, 2.0, 10));
         histogram.observe(1.0);
+        registry.register("my_histogram", "My histogram", histogram.clone());
 
         let mut encoded = String::new();
 
@@ -734,15 +735,15 @@ mod tests {
     #[test]
     fn encode_histogram_family() {
         let mut registry = Registry::default();
-        let family =
+        let mut family =
             Family::new_with_constructor(|| Histogram::new(exponential_buckets(1.0, 2.0, 10)));
-        registry.register("my_histogram", "My histogram", family.clone());
         family
             .get_or_create(&vec![
                 ("method".to_string(), "GET".to_string()),
                 ("status".to_string(), "200".to_string()),
             ])
             .observe(1.0);
+        registry.register("my_histogram", "My histogram", family);
 
         let mut encoded = String::new();
 
@@ -754,7 +755,7 @@ mod tests {
     #[test]
     fn encode_histogram_with_exemplars() {
         let mut registry = Registry::default();
-        let histogram = HistogramWithExemplars::new(exponential_buckets(1.0, 2.0, 10));
+        let mut histogram = HistogramWithExemplars::new(exponential_buckets(1.0, 2.0, 10));
         registry.register("my_histogram", "My histogram", histogram.clone());
         histogram.observe(1.0, Some([("user_id".to_string(), 42u64)]));
 

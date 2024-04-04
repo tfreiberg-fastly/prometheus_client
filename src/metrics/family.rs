@@ -5,8 +5,6 @@
 use crate::encoding::{EncodeLabelSet, EncodeMetric, MetricEncoder};
 
 use super::{MetricType, TypedMetric};
-use parking_lot::{MappedRwLockReadGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::sync::Arc;
 use std::{
     collections::HashMap,
     hash::{BuildHasher, RandomState},
@@ -104,7 +102,7 @@ use std::{
 /// ```
 // TODO: Consider exposing hash algorithm.
 pub struct Family<S, M, C = fn() -> M, H = RandomState> {
-    metrics: Arc<RwLock<HashMap<S, M, H>>>,
+    metrics: HashMap<S, M, H>,
     /// Function that when called constructs a new metric.
     ///
     /// For most metric types this would simply be its [`Default`]
@@ -176,7 +174,7 @@ impl<S: Clone + std::hash::Hash + Eq, M: Default, H: Default> Default
 {
     fn default() -> Self {
         Self {
-            metrics: Arc::new(RwLock::new(Default::default())),
+            metrics: Default::default(),
             constructor: M::default,
         }
     }
@@ -206,7 +204,7 @@ impl<S: Clone + std::hash::Hash + Eq, M, C> Family<S, M, C> {
     /// ```
     pub fn new_with_constructor(constructor: C) -> Self {
         Self {
-            metrics: Arc::new(RwLock::new(HashMap::<S, M>::default())),
+            metrics: HashMap::<S, M>::default(),
             constructor,
         }
     }
@@ -216,7 +214,7 @@ impl<S: Clone + std::hash::Hash + Eq, M: Default, H> Family<S, M, fn() -> M, H> 
     /// Create a metric family using a custom hasher for the hashmap of metrics.
     pub fn new_with_hasher(hasher: H) -> Self {
         Self {
-            metrics: Arc::new(RwLock::new(HashMap::with_hasher(hasher))),
+            metrics: HashMap::with_hasher(hasher),
             constructor: M::default,
         }
     }
@@ -227,7 +225,7 @@ impl<S: Clone + std::hash::Hash + Eq, M, C, H> Family<S, M, C, H> {
     /// metrics and a custom hasher for the hashmap of metrics.
     pub fn new_with_constructor_and_hasher(constructor: C, hasher: H) -> Self {
         Self {
-            metrics: Arc::new(RwLock::new(HashMap::with_hasher(hasher))),
+            metrics: HashMap::with_hasher(hasher),
             constructor,
         }
     }
@@ -253,26 +251,18 @@ impl<S: Clone + std::hash::Hash + Eq, M, C: MetricConstructor<M>, H: BuildHasher
     /// // calls.
     /// family.get_or_create(&vec![("method".to_owned(), "GET".to_owned())]).inc();
     /// ```
-    pub fn get_or_create(&self, label_set: &S) -> MappedRwLockReadGuard<M> {
-        if let Ok(metric) =
-            RwLockReadGuard::try_map(self.metrics.read(), |metrics| metrics.get(label_set))
-        {
-            return metric;
+    pub fn get_or_create<'a>(&'a mut self, label_set: &S) -> &'a mut M {
+        if self.metrics.contains_key(label_set) {
+            return self
+                .metrics
+                .get_mut(label_set)
+                .expect("just checked contains_key");
         }
-
-        let mut write_guard = self.metrics.write();
-
-        write_guard
-            .entry(label_set.clone())
-            .or_insert_with(|| self.constructor.new_metric());
-
-        let read_guard = RwLockWriteGuard::downgrade(write_guard);
-
-        RwLockReadGuard::map(read_guard, |metrics| {
-            metrics
-                .get(label_set)
-                .expect("Metric to exist after creating it.")
-        })
+        self.metrics
+            .insert(label_set.clone(), self.constructor.new_metric());
+        self.metrics
+            .get_mut(label_set)
+            .expect("just inserted the metric")
     }
 
     /// Remove a label set from the metric family.
@@ -293,8 +283,8 @@ impl<S: Clone + std::hash::Hash + Eq, M, C: MetricConstructor<M>, H: BuildHasher
     /// // removed.
     /// assert!(family.remove(&vec![("method".to_owned(), "GET".to_owned())]));
     /// ```
-    pub fn remove(&self, label_set: &S) -> bool {
-        self.metrics.write().remove(label_set).is_some()
+    pub fn remove(&mut self, label_set: &S) -> bool {
+        self.metrics.remove(label_set).is_some()
     }
 
     /// Clear all label sets from the metric family.
@@ -312,21 +302,12 @@ impl<S: Clone + std::hash::Hash + Eq, M, C: MetricConstructor<M>, H: BuildHasher
     /// // Clear the family of all label sets.
     /// family.clear();
     /// ```
-    pub fn clear(&self) {
-        self.metrics.write().clear()
+    pub fn clear(&mut self) {
+        self.metrics.clear()
     }
 
-    pub(crate) fn read(&self) -> RwLockReadGuard<HashMap<S, M, H>> {
-        self.metrics.read()
-    }
-}
-
-impl<S, M, C: Clone, H: Clone> Clone for Family<S, M, C, H> {
-    fn clone(&self) -> Self {
-        Family {
-            metrics: self.metrics.clone(),
-            constructor: self.constructor.clone(),
-        }
+    pub(crate) fn read(&self) -> &HashMap<S, M, H> {
+        &self.metrics
     }
 }
 
@@ -365,7 +346,7 @@ mod tests {
 
     #[test]
     fn counter_family() {
-        let family = Family::<Vec<(String, String)>, Counter>::default();
+        let mut family = Family::<Vec<(String, String)>, Counter>::default();
 
         family
             .get_or_create(&vec![("method".to_string(), "GET".to_string())])
@@ -403,7 +384,7 @@ mod tests {
 
     #[test]
     fn counter_family_remove() {
-        let family = Family::<Vec<(String, String)>, Counter>::default();
+        let mut family = Family::<Vec<(String, String)>, Counter>::default();
 
         family
             .get_or_create(&vec![("method".to_string(), "GET".to_string())])
@@ -455,7 +436,7 @@ mod tests {
 
     #[test]
     fn counter_family_clear() {
-        let family = Family::<Vec<(String, String)>, Counter>::default();
+        let mut family = Family::<Vec<(String, String)>, Counter>::default();
 
         // Create a label and check it.
         family
@@ -504,20 +485,20 @@ mod tests {
     #[test]
     fn family_with_custom_hasher() {
         fn run_family_test<M: Debug + TypedMetric + EncodeMetric>(
-            f: Family<Vec<(&str, &str)>, M, impl Fn() -> M, impl BuildHasher>,
-            record_metric: impl Fn(&M),
+            mut f: Family<Vec<(&str, &str)>, M, impl Fn() -> M, impl BuildHasher>,
+            record_metric: impl Fn(&mut M),
         ) {
             eprintln!("checking family {f:?}");
             {
                 let m = f.get_or_create(&vec![("label", "value")]);
-                record_metric(&*m);
+                record_metric(m);
             }
             takes_encodemetric(f);
         }
         fn takes_encodemetric(_: impl EncodeMetric) {}
 
         let family = Family::<Vec<(&str, &str)>, Counter, _, DummyHasher>::default();
-        run_family_test(family, |counter: &Counter| {
+        run_family_test(family, |counter: &mut Counter| {
             counter.inc();
         });
 
@@ -525,6 +506,6 @@ mod tests {
             || Histogram::new(exponential_buckets(1.0, 2.0, 3)),
             DummyHasher,
         );
-        run_family_test(family, |histogram: &Histogram| histogram.observe(1.5));
+        run_family_test(family, |histogram: &mut Histogram| histogram.observe(1.5));
     }
 }

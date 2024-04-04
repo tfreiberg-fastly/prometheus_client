@@ -5,11 +5,6 @@
 use crate::encoding::{EncodeGaugeValue, EncodeMetric, MetricEncoder};
 
 use super::{MetricType, TypedMetric};
-use std::marker::PhantomData;
-use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
-#[cfg(not(any(target_arch = "mips", target_arch = "powerpc")))]
-use std::sync::atomic::{AtomicI64, AtomicU64};
-use std::sync::Arc;
 
 /// Open Metrics [`Gauge`] to record current measurements.
 ///
@@ -42,60 +37,56 @@ use std::sync::Arc;
 /// ```
 #[cfg(not(any(target_arch = "mips", target_arch = "powerpc")))]
 #[derive(Debug)]
-pub struct Gauge<N = i64, A = AtomicI64> {
-    value: Arc<A>,
-    phantom: PhantomData<N>,
+pub struct Gauge<N = i64> {
+    value: N,
 }
 
 /// Open Metrics [`Gauge`] to record current measurements.
 #[cfg(any(target_arch = "mips", target_arch = "powerpc"))]
 #[derive(Debug)]
-pub struct Gauge<N = i32, A = AtomicI32> {
-    value: Arc<A>,
-    phantom: PhantomData<N>,
+pub struct Gauge<N = i32> {
+    value: N,
 }
 
-impl<N, A> Clone for Gauge<N, A> {
+impl<N: Clone> Clone for Gauge<N> {
     fn clone(&self) -> Self {
         Self {
             value: self.value.clone(),
-            phantom: PhantomData,
         }
     }
 }
 
-impl<N, A: Default> Default for Gauge<N, A> {
+impl<N: Default> Default for Gauge<N> {
     fn default() -> Self {
         Self {
-            value: Arc::new(A::default()),
-            phantom: PhantomData,
+            value: N::default(),
         }
     }
 }
 
-impl<N, A: Atomic<N>> Gauge<N, A> {
+impl<N: Number> Gauge<N> {
     /// Increase the [`Gauge`] by 1, returning the previous value.
-    pub fn inc(&self) -> N {
+    pub fn inc(&mut self) -> N {
         self.value.inc()
     }
 
     /// Increase the [`Gauge`] by `v`, returning the previous value.
-    pub fn inc_by(&self, v: N) -> N {
+    pub fn inc_by(&mut self, v: N) -> N {
         self.value.inc_by(v)
     }
 
     /// Decrease the [`Gauge`] by 1, returning the previous value.
-    pub fn dec(&self) -> N {
+    pub fn dec(&mut self) -> N {
         self.value.dec()
     }
 
     /// Decrease the [`Gauge`] by `v`, returning the previous value.
-    pub fn dec_by(&self, v: N) -> N {
+    pub fn dec_by(&mut self, v: N) -> N {
         self.value.dec_by(v)
     }
 
     /// Sets the [`Gauge`] to `v`, returning the previous value.
-    pub fn set(&self, v: N) -> N {
+    pub fn set(&mut self, v: N) -> N {
         self.value.set(v)
     }
 
@@ -103,173 +94,154 @@ impl<N, A: Atomic<N>> Gauge<N, A> {
     pub fn get(&self) -> N {
         self.value.get()
     }
-
-    /// Exposes the inner atomic type of the [`Gauge`].
-    ///
-    /// This should only be used for advanced use-cases which are not directly
-    /// supported by the library.
-    pub fn inner(&self) -> &A {
-        &self.value
-    }
 }
 
 /// Atomic operations for a [`Gauge`] value store.
-pub trait Atomic<N> {
+pub trait Number {
     /// Increase the value by `1`.
-    fn inc(&self) -> N;
+    fn inc(&mut self) -> Self;
 
     /// Increase the value.
-    fn inc_by(&self, v: N) -> N;
+    fn inc_by(&mut self, v: Self) -> Self;
 
     /// Decrease the value by `1`.
-    fn dec(&self) -> N;
+    fn dec(&mut self) -> Self;
 
     /// Decrease the value.
-    fn dec_by(&self, v: N) -> N;
+    fn dec_by(&mut self, v: Self) -> Self;
 
     /// Set the value.
-    fn set(&self, v: N) -> N;
+    fn set(&mut self, v: Self) -> Self;
 
     /// Get the value.
-    fn get(&self) -> N;
+    fn get(&self) -> Self;
 }
 
-impl Atomic<i32> for AtomicI32 {
-    fn inc(&self) -> i32 {
+impl Number for i32 {
+    fn inc(&mut self) -> i32 {
         self.inc_by(1)
     }
 
-    fn inc_by(&self, v: i32) -> i32 {
-        self.fetch_add(v, Ordering::Relaxed)
+    fn inc_by(&mut self, v: i32) -> i32 {
+        *self += v;
+        *self
     }
 
-    fn dec(&self) -> i32 {
+    fn dec(&mut self) -> i32 {
         self.dec_by(1)
     }
 
-    fn dec_by(&self, v: i32) -> i32 {
-        self.fetch_sub(v, Ordering::Relaxed)
+    fn dec_by(&mut self, v: i32) -> i32 {
+        *self -= v;
+        *self
     }
 
-    fn set(&self, v: i32) -> i32 {
-        self.swap(v, Ordering::Relaxed)
+    fn set(&mut self, v: i32) -> i32 {
+        *self = v;
+        *self
     }
 
     fn get(&self) -> i32 {
-        self.load(Ordering::Relaxed)
+        *self
     }
 }
 
-impl Atomic<u32> for AtomicU32 {
-    fn inc(&self) -> u32 {
+impl Number for u32 {
+    fn inc(&mut self) -> u32 {
         self.inc_by(1)
     }
 
-    fn inc_by(&self, v: u32) -> u32 {
-        self.fetch_add(v, Ordering::Relaxed)
+    fn inc_by(&mut self, v: u32) -> u32 {
+        *self += v;
+        *self
     }
 
-    fn dec(&self) -> u32 {
+    fn dec(&mut self) -> u32 {
         self.dec_by(1)
     }
 
-    fn dec_by(&self, v: u32) -> u32 {
-        self.fetch_sub(v, Ordering::Relaxed)
+    fn dec_by(&mut self, v: u32) -> u32 {
+        *self -= v;
+        *self
     }
 
-    fn set(&self, v: u32) -> u32 {
-        self.swap(v, Ordering::Relaxed)
+    fn set(&mut self, v: u32) -> u32 {
+        *self = v;
+        *self
     }
 
     fn get(&self) -> u32 {
-        self.load(Ordering::Relaxed)
+        *self
     }
 }
 
 #[cfg(not(any(target_arch = "mips", target_arch = "powerpc")))]
-impl Atomic<i64> for AtomicI64 {
-    fn inc(&self) -> i64 {
+impl Number for i64 {
+    fn inc(&mut self) -> i64 {
         self.inc_by(1)
     }
 
-    fn inc_by(&self, v: i64) -> i64 {
-        self.fetch_add(v, Ordering::Relaxed)
+    fn inc_by(&mut self, v: i64) -> i64 {
+        *self += v;
+        *self
     }
 
-    fn dec(&self) -> i64 {
+    fn dec(&mut self) -> i64 {
         self.dec_by(1)
     }
 
-    fn dec_by(&self, v: i64) -> i64 {
-        self.fetch_sub(v, Ordering::Relaxed)
+    fn dec_by(&mut self, v: i64) -> i64 {
+        *self -= v;
+        *self
     }
 
-    fn set(&self, v: i64) -> i64 {
-        self.swap(v, Ordering::Relaxed)
+    fn set(&mut self, v: i64) -> i64 {
+        *self = v;
+        *self
     }
 
     fn get(&self) -> i64 {
-        self.load(Ordering::Relaxed)
+        *self
     }
 }
 
 #[cfg(not(any(target_arch = "mips", target_arch = "powerpc")))]
-impl Atomic<f64> for AtomicU64 {
-    fn inc(&self) -> f64 {
+impl Number for f64 {
+    fn inc(&mut self) -> f64 {
         self.inc_by(1.0)
     }
 
-    fn inc_by(&self, v: f64) -> f64 {
-        let mut old_u64 = self.load(Ordering::Relaxed);
-        let mut old_f64;
-        loop {
-            old_f64 = f64::from_bits(old_u64);
-            let new = f64::to_bits(old_f64 + v);
-            match self.compare_exchange_weak(old_u64, new, Ordering::Relaxed, Ordering::Relaxed) {
-                Ok(_) => break,
-                Err(x) => old_u64 = x,
-            }
-        }
-
-        old_f64
+    fn inc_by(&mut self, v: f64) -> f64 {
+        *self += v;
+        *self
     }
 
-    fn dec(&self) -> f64 {
+    fn dec(&mut self) -> f64 {
         self.dec_by(1.0)
     }
 
-    fn dec_by(&self, v: f64) -> f64 {
-        let mut old_u64 = self.load(Ordering::Relaxed);
-        let mut old_f64;
-        loop {
-            old_f64 = f64::from_bits(old_u64);
-            let new = f64::to_bits(old_f64 - v);
-            match self.compare_exchange_weak(old_u64, new, Ordering::Relaxed, Ordering::Relaxed) {
-                Ok(_) => break,
-                Err(x) => old_u64 = x,
-            }
-        }
-
-        old_f64
+    fn dec_by(&mut self, v: f64) -> f64 {
+        *self -= v;
+        *self
     }
 
-    fn set(&self, v: f64) -> f64 {
-        f64::from_bits(self.swap(f64::to_bits(v), Ordering::Relaxed))
+    fn set(&mut self, v: f64) -> f64 {
+        *self = v;
+        *self
     }
 
     fn get(&self) -> f64 {
-        f64::from_bits(self.load(Ordering::Relaxed))
+        *self
     }
 }
 
-impl<N, A> TypedMetric for Gauge<N, A> {
+impl<N> TypedMetric for Gauge<N> {
     const TYPE: MetricType = MetricType::Gauge;
 }
 
-impl<N, A> EncodeMetric for Gauge<N, A>
+impl<N> EncodeMetric for Gauge<N>
 where
-    N: EncodeGaugeValue,
-    A: Atomic<N>,
+    N: EncodeGaugeValue + Number,
 {
     fn encode(&self, mut encoder: MetricEncoder) -> Result<(), std::fmt::Error> {
         encoder.encode_gauge(&self.get())
@@ -317,7 +289,7 @@ mod tests {
 
     #[test]
     fn inc_dec_and_get() {
-        let gauge: Gauge = Gauge::default();
+        let mut gauge: Gauge = Gauge::default();
         assert_eq!(0, gauge.inc());
         assert_eq!(1, gauge.get());
 

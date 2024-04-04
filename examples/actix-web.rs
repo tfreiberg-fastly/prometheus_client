@@ -19,13 +19,13 @@ pub struct MethodLabels {
 }
 
 pub struct Metrics {
-    requests: Family<MethodLabels, Counter>,
+    _requests: Family<MethodLabels, Counter>,
 }
 
 impl Metrics {
-    pub fn inc_requests(&self, method: Method) {
-        self.requests.get_or_create(&MethodLabels { method }).inc();
-    }
+    // pub fn inc_requests(&mut self, method: Method) {
+    //     self.requests.get_or_create(&MethodLabels { method }).inc();
+    // }
 }
 
 pub struct AppState {
@@ -41,22 +41,22 @@ pub async fn metrics_handler(state: web::Data<Mutex<AppState>>) -> Result<HttpRe
         .body(body))
 }
 
-pub async fn some_handler(metrics: web::Data<Metrics>) -> impl Responder {
-    metrics.inc_requests(Method::Get);
+pub async fn some_handler(_metrics: web::Data<Metrics>) -> impl Responder {
+    // metrics.inc_requests(Method::Get);
     "okay".to_string()
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let metrics = web::Data::new(Metrics {
-        requests: Family::default(),
+        _requests: Family::default(),
     });
-    let mut state = AppState {
+    let state = AppState {
         registry: Registry::default(),
     };
-    state
-        .registry
-        .register("requests", "Count of requests", metrics.requests.clone());
+    // state
+    //     .registry
+    //     .register("requests", "Count of requests", metrics.requests);
     let state = web::Data::new(Mutex::new(state));
 
     HttpServer::new(move || {

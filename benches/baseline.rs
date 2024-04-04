@@ -4,7 +4,7 @@ use prometheus_client::metrics::family::Family;
 
 pub fn baseline(c: &mut Criterion) {
     c.bench_function("counter", |b| {
-        let counter: Counter = Counter::default();
+        let mut counter: Counter = Counter::default();
 
         b.iter(|| {
             counter.inc();
@@ -12,7 +12,7 @@ pub fn baseline(c: &mut Criterion) {
     });
 
     c.bench_function("counter via family lookup", |b| {
-        let family = Family::<(), Counter>::default();
+        let mut family = Family::<(), Counter>::default();
 
         b.iter(|| {
             family.get_or_create(&()).inc();
